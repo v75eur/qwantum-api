@@ -139,7 +139,7 @@ def push_to_github(filename, content):
     if not GH_TOKEN: return
     try:
         encoded=base64.b64encode(content.encode()).decode()
-        url=f"https://api.github.com/repos/v75eur/qwantum/contents/{filename}"
+        url=f"https://api.github.com/repos/v75eur/qwantum-api/contents/{filename}"
         r=requests.get(url,headers={"Authorization":f"token {GH_TOKEN}"})
         sha=r.json().get('sha','') if r.status_code==200 else ''
         data={"message":"Auto L4","content":encoded}
