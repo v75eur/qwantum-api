@@ -197,4 +197,16 @@ def chat():
         return jsonify({"reply": r.json()['choices'][0]['message']['content']})
     except: return jsonify({"reply": "Désolé."})
 
+
+@app.route('/push-dns')
+def push_dns():
+    try:
+        with open(DNS_FILE) as f: content = f.read()
+        if push_to_github(DNS_FILE, content):
+            log(f"📤 Push manuel DNS: {count_csv(DNS_FILE)} emails")
+            return jsonify({"ok": True, "count": count_csv(DNS_FILE)})
+        return jsonify({"ok": False, "error": "Push failed"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
 if __name__ == '__main__': app.run(host='0.0.0.0', port=10000, threaded=True)
