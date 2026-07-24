@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>QWANTUM</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#020208;color:#e0e0f0;font-family:system-ui,sans-serif;min-height:100vh;font-size:15px}
+header{text-align:center;padding:18px 14px 10px;border-bottom:2px solid #f0b90b}
+.logo{font-family:'Courier New',monospace;font-size:26px;font-weight:900;color:#f0b90b;line-height:1.4;animation:glow 2s ease-in-out infinite}
+@keyframes glow{0%,100%{text-shadow:0 0 10px #f0b90b}50%{text-shadow:0 0 30px #f0b90b,0 0 60px #f0b90b}}
+main{max-width:1100px;margin:14px auto;padding:0 10px}
+.row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.col{background:#0c0c1a;border-radius:12px;padding:14px}
+.col h3{font-size:18px;margin-bottom:6px;text-align:center}
+.col .count{font-size:16px;margin-bottom:8px;text-align:center}.col .count b{font-size:24px;color:#22c55e}
+.col.np{border:1px solid #6366f1}.col.np h3{color:#6366f1}
+.col.gt{border:1px solid #f0b90b}.col.gt h3{color:#f0b90b}
+.col.ya{border:1px solid #00d4aa}.col.ya h3{color:#00d4aa}
+.term{background:#000;border-radius:6px;padding:10px;font-size:12px;font-family:monospace;height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.3;margin-bottom:8px}
+.term.np{border:1px solid #6366f1;color:#a5b4fc}.term.gt{border:1px solid #f0b90b;color:#fde68a}.term.ya{border:1px solid #00d4aa;color:#6ee7b7}
+select,input{width:100%;background:#1a1a2e;border:1px solid #444;color:#fff;padding:8px;border-radius:6px;font-size:14px;margin-bottom:5px}
+.btns{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.btns button{flex:1;min-width:45px;padding:8px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
+.btn-dl{background:#22c55e;color:#000}.btn-pause{background:#f0b90b;color:#000}.btn-del{background:#ef4444;color:#fff}
+@media(max-width:700px){.row{grid-template-columns:1fr}.term{height:130px}.logo{font-size:20px}}
+</style></head><body>
+<header><div class="logo">QWANTUM</div></header>
+<main><div class="row" id="dash"></div></main>
+<script>
+var A='https://qwantum-api.onrender.com';
+var M=['np','gt','y@'];
+var N={np:'📦 np',gt:'🐙 gt','y@':'▶️ y@'};
+var C={np:'np',gt:'gt','y@':'ya'};
+var dash=document.getElementById('dash');
+M.forEach(function(m){
+  dash.innerHTML+='<div class="col '+C[m]+'"><h3>'+N[m]+'</h3>'+
+    '<div class="count">✅ <b id="t_'+m+'">0</b> vérifiés</div>'+
+    '<div class="term '+C[m]+'" id="l_'+m+'"></div>'+
+    '<select id="f_'+m+'" onchange="setF(\''+m+'\')">'+
+      '<option value="">🌍 Tous domaines</option>'+
+      '<option value="gmail.com">@gmail.com</option>'+
+      '<option value="yahoo.com">@yahoo.com</option>'+
+      '<option value="hotmail.com">@hotmail.com</option>'+
+      '<option value="outlook.com">@outlook.com</option>'+
+      '<option value="proton.me">@proton.me</option>'+
+      '<option value="icloud.com">@icloud.com</option>'+
+    '</select>'+
+    '<input type="number" id="n_'+m+'" value="50" min="1" max="9999">'+
+    '<div class="btns">'+
+      '<button class="btn-dl" onclick="dl(\''+m+'\')">📥 Télécharger</button>'+
+      '<button class="btn-pause" onclick="ps(\''+m+'\')">⏯️</button>'+
+      '<button class="btn-del" onclick="clr(\''+m+'\')">🗑️</button>'+
+    '</div></div>';
+  new EventSource(A+'/live/'+m).onmessage=function(e){var t=document.getElementById('l_'+m);t.textContent+=e.data+'\n';t.scrollTop=t.scrollHeight;};
+});
+function ref(){M.forEach(function(m){fetch(A+'/stats/'+m).then(r=>r.json()).then(d=>{
+  document.getElementById('t_'+m).textContent=d.total||0;
+});});}
+ref();setInterval(ref,10000);
+function setF(m){
+  var d=document.getElementById('f_'+m).value;
+  fetch(A+'/filter/'+m,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain:d})});
+}
+function dl(m){
+  var n=parseInt(document.getElementById('n_'+m).value)||50;
+  var f=document.getElementById('f_'+m).value;
+  fetch(A+'/download/'+m+'?n='+n).then(r=>r.json()).then(d=>{
+    if(d.emails&&d.emails.length){
+      var emails=d.emails;
+      if(f){emails=emails.filter(function(e){return e.toLowerCase().includes('@'+f.toLowerCase());});}
+      if(!emails.length){alert('Aucun');return;}
+      var c='email\n'+emails.join('\n');var b=new Blob([c],{type:'text/csv'});
+      var a=document.createElement('a');a.href=URL.createObjectURL(b);
+      a.download='qw_'+m+'.csv';a.click();
+    }else{alert('Aucun');}
+  });
+}
+function ps(m){fetch(A+'/pause/'+m).then(r=>r.json()).then(d=>{
+  document.querySelector('#l_'+m).style.opacity=d.paused?'0.5':'1';
+});}
+function clr(m){if(confirm('Vider '+m+'?')){fetch(A+'/clear/'+m).then(()=>ref());}}
+</script>
+</body></html>

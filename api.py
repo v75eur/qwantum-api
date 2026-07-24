@@ -13,6 +13,7 @@ EMAIL_REGEX = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 LOGS = {"np": [], "gt": [], "y@": []}
 LOCKS = {"np": threading.Lock(), "gt": threading.Lock(), "y@": threading.Lock()}
 FILTERS = {"np": "", "gt": "", "y@": ""}
+PAUSED = {"np": False, "gt": False, "y@": False}
 
 def log(m, msg):
     t = datetime.now().strftime('%H:%M:%S')
@@ -21,9 +22,9 @@ def log(m, msg):
     with LOCKS[m]: LOGS[m].append(line); del LOGS[m][:-500]
 
 FILES = {
-    "np": {"L3": "L3_np.csv", "L4": "L4_np.csv", "L5": "L5_np.csv"},
-    "gt": {"L3": "L3_gt.csv", "L4": "L4_gt.csv", "L5": "L5_gt.csv"},
-    "y@": {"L3": "L3_y@.csv", "L4": "L4_y@.csv", "L5": "L5_y@.csv"}
+    "np": {"L4": "L4_np.csv", "L5": "L5_np.csv"},
+    "gt": {"L4": "L4_gt.csv", "L5": "L5_gt.csv"},
+    "y@": {"L4": "L4_y@.csv", "L5": "L5_y@.csv"}
 }
 
 DISPOSABLE = {'mailinator.com','tempmail.com','10minutemail.com','guerrillamail.com','yopmail.com','throwaway.email','trashmail.com','sharklasers.com','temp-mail.org','fakeinbox.com','maildrop.cc','getnada.com','mailnesia.com','spamgourmet.com'}
@@ -68,12 +69,12 @@ def is_catch_all(domain, td):
         td[domain] = False; return False
 
 def verify(email, td):
-    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email): return None
-    if is_disposable(email): return None
-    if not dns_ok(email): return None
+    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email): return False
+    if is_disposable(email): return False
+    if not dns_ok(email): return False
     domain = email.split('@')[1]
-    if is_catch_all(domain, td): return 'L3'
-    return 'L4'
+    if is_catch_all(domain, td): return False
+    return True
 
 def scrape_npm(kw):
     found=[]
@@ -140,38 +141,40 @@ def push_to_github(filename, content):
         url=f"https://api.github.com/repos/v75eur/qwantum-api/contents/{filename}"
         r=requests.get(url,headers={"Authorization":f"token {GH_TOKEN}"})
         sha=r.json().get('sha','') if r.status_code==200 else ''
-        data={"message":"Auto L4","content":encoded}
+        data={"message":"Auto","content":encoded}
         if sha: data["sha"]=sha
         requests.put(url,headers={"Authorization":f"token {GH_TOKEN}"},json=data)
     except: pass
 
 def run_moteur(m, scraper):
     WORDS=['trading','forex','crypto','investing','stocks','bitcoin','ethereum','finance','business','marketing','startup','python','javascript','react','node','developer','blockchain','defi','nft','ai','machine','data','cloud','docker','aws']
-    L3=set(read_csv(FILES[m]["L3"])); L4=set(read_csv(FILES[m]["L4"])); L5=set(read_csv(FILES[m]["L5"]))
-    SEEN=L3|L4|L5
+    L4=set(read_csv(FILES[m]["L4"])); L5=set(read_csv(FILES[m]["L5"]))
+    SEEN=L4|L5
     tested={}
-    log(m, f"🚀 L3:{len(L3)} L4:{len(L4)} L5:{len(L5)}")
+    log(m, f"🚀 Vérifiés: {len(L4)} | SMTP: {len(L5)}")
     last_push=time.time()
     while True:
+        if PAUSED.get(m):
+            time.sleep(5)
+            continue
         kw=random.choice(WORDS)
         log(m, f"🔍 {kw}")
         new=scraper(kw)
-        added_L3=0; added_L4=0
+        added=0
         for em in new:
             if em in SEEN: continue
             if FILTERS.get(m) and not em.endswith('@'+FILTERS[m]): continue
             SEEN.add(em)
-            level=verify(em, tested)
-            if level=='L4': L4.add(em); added_L4+=1; log(m, f"✅ L4: {em}")
-            elif level=='L3': L3.add(em); added_L3+=1; log(m, f"⚠️ L3: {em}")
-        if added_L3: save_csv(FILES[m]["L3"], L3)
-        if added_L4:
+            if verify(em, tested):
+                L4.add(em); added+=1; log(m, f"✅ {em}")
+            else:
+                log(m, f"❌ {em}")
+        if added:
             save_csv(FILES[m]["L4"], L4)
             if time.time()-last_push>300:
                 push_to_github(FILES[m]["L4"], '\n'.join(['email']+sorted(L4)))
                 last_push=time.time()
-        if added_L3 or added_L4:
-            log(m, f"📊 +{added_L3+added_L4} | L3:{len(L3)} L4:{len(L4)} L5:{len(L5)}")
+            log(m, f"📊 +{added} | Total: {len(L4)}")
         time.sleep(random.randint(10,30))
 
 threading.Thread(target=run_moteur,args=("np",scrape_npm),daemon=True).start()
@@ -181,7 +184,7 @@ threading.Thread(target=run_moteur,args=("y@",scrape_youtube),daemon=True).start
 @app.route('/stats/<m>')
 def stats(m):
     if m not in FILES: return jsonify({})
-    return jsonify({"L3":count_csv(FILES[m]["L3"]),"L4":count_csv(FILES[m]["L4"]),"L5":count_csv(FILES[m]["L5"])})
+    return jsonify({"total":count_csv(FILES[m]["L4"])})
 
 @app.route('/live/<m>')
 def live(m):
@@ -197,13 +200,11 @@ def live(m):
             time.sleep(0.3)
     return Response(g(),mimetype='text/event-stream')
 
-@app.route('/download/<m>/<t>')
-def download(m,t):
+@app.route('/download/<m>')
+def download(m):
     if m not in FILES: return jsonify({"emails":[]})
-    t = f"L{t}" if t in ['3','4','5'] else t
-    if t not in FILES[m]: return jsonify({"emails":[]})
     n=request.args.get('n',50,type=int)
-    return jsonify({"emails":read_csv(FILES[m][t])[:n]})
+    return jsonify({"emails":read_csv(FILES[m]["L4"])[:n]})
 
 @app.route('/filter/<m>', methods=['POST'])
 def set_filter(m):
@@ -212,12 +213,19 @@ def set_filter(m):
     domain=d.get('domain','').strip().lower() if d else ''
     FILTERS[m]=domain
     log(m, f"🎯 Filtre: {'@'+domain if domain else 'TOUS'}")
-    return jsonify({"msg":f"Filtre {m}: {'@'+domain if domain else 'TOUS'}"})
+    return jsonify({"msg":f"OK"})
+
+@app.route('/pause/<m>')
+def pause(m):
+    PAUSED[m]=not PAUSED.get(m,False)
+    log(m, f"{'⏸️ Pause' if PAUSED[m] else '▶️ Reprise'}")
+    return jsonify({"paused":PAUSED[m]})
 
 @app.route('/clear/<m>')
 def clear(m):
     if m not in FILES: return jsonify({"msg":"?"})
     for t in FILES[m].values(): save_csv(t, [])
+    log(m, "🗑️ Vidé")
     return jsonify({"msg":f"{m} vidé"})
 
 @app.route('/')
