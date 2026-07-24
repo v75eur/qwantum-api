@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import requests, os, dns.resolver, csv, time, random, threading, re, smtplib
+import requests, os, dns.resolver, csv, time, random, threading, re, smtplib, base64
 from datetime import datetime
 
 app = Flask(__name__)
@@ -21,9 +21,9 @@ def log(m, msg):
 
 # 3 fichiers par moteur
 FILES = {
-    "np": {"dns": "dns_np.csv", "smtp": "smtp_np.csv", "final": "final_np.csv"},
-    "gt": {"dns": "dns_gt.csv", "smtp": "smtp_gt.csv", "final": "final_gt.csv"},
-    "y@": {"dns": "dns_y@.csv", "smtp": "smtp_y@.csv", "final": "final_y@.csv"}
+    "np": {"L3": "L3_np.csv", "L4": "L4_np.csv", "L5": "L5_np.csv"},
+    "gt": {"L3": "L3_gt.csv", "L4": "L4_gt.csv", "L5": "L5_gt.csv"},
+    "y@": {"L3": "L3_y@.csv", "L4": "L4_y@.csv", "L5": "L5_y@.csv"}
 }
 
 DISPOSABLE = {'mailinator.com','tempmail.com','10minutemail.com','guerrillamail.com','yopmail.com','throwaway.email','trashmail.com','sharklasers.com','temp-mail.org','fakeinbox.com','maildrop.cc','getnada.com','mailnesia.com','spamgourmet.com'}
@@ -69,17 +69,13 @@ def is_catch_all(domain, td):
         return False
 
 def verify(email, td):
-    """Retourne le niveau: 'dns', 'smtp', ou None"""
-    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-        return None
-    if is_disposable(email):
-        return None
-    if not dns_ok(email):
-        return None
+    """Retourne 'L3', 'L4', ou None"""
+    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email): return None
+    if is_disposable(email): return None
+    if not dns_ok(email): return None
     domain = email.split('@')[1]
-    if is_catch_all(domain, td):
-        return 'dns'  # 3/5, catch-all détecté
-    return 'smtp'  # 4/5, prêt pour SMTP final
+    if is_catch_all(domain, td): return 'L3'
+    return 'L4'
 
 def scrape_npm(kw):
     found=[]
@@ -139,33 +135,42 @@ def scrape_youtube(kw):
     except: pass
     return found
 
+def push_to_github(filename, content):
+    if not GH_TOKEN: return
+    try:
+        encoded=base64.b64encode(content.encode()).decode()
+        url=f"https://api.github.com/repos/v75eur/qwantum/contents/{filename}"
+        r=requests.get(url,headers={"Authorization":f"token {GH_TOKEN}"})
+        sha=r.json().get('sha','') if r.status_code==200 else ''
+        data={"message":"Auto L4","content":encoded}
+        if sha: data["sha"]=sha
+        requests.put(url,headers={"Authorization":f"token {GH_TOKEN}"},json=data)
+    except: pass
+
 def run_moteur(m, scraper):
     WORDS=['trading','forex','crypto','investing','stocks','bitcoin','ethereum','finance','business','marketing','startup','python','javascript','react','node','developer','blockchain','defi','nft','ai','machine','data','cloud','docker','aws']
-    SEEN=set(read_csv(FILES[m]["dns"]) + read_csv(FILES[m]["smtp"]) + read_csv(FILES[m]["final"]))
-    dns_set=set(read_csv(FILES[m]["dns"]))
-    smtp_set=set(read_csv(FILES[m]["smtp"]))
-    final_set=set(read_csv(FILES[m]["final"]))
+    L3=set(read_csv(FILES[m]["L3"])); L4=set(read_csv(FILES[m]["L4"])); L5=set(read_csv(FILES[m]["L5"]))
+    SEEN=L3|L4|L5
     tested={}
-    log(m, f"🚀 DNS:{len(dns_set)} | SMTP:{len(smtp_set)} | FINAL:{len(final_set)}")
+    log(m, f"🚀 L3:{len(L3)} | L4:{len(L4)} | L5:{len(L5)}")
     while True:
         kw=random.choice(WORDS)
         log(m, f"🔍 {kw}")
         new=scraper(kw)
-        dns_added=0; smtp_added=0
+        added_L3=0; added_L4=0
         for em in new:
             if em in SEEN: continue
             SEEN.add(em)
             level=verify(em, tested)
-            if level=='smtp':
-                smtp_set.add(em); smtp_added+=1
-                log(m, f"✅ SMTP: {em}")
-            elif level=='dns':
-                dns_set.add(em); dns_added+=1
-                log(m, f"⚠️ DNS: {em}")
-        if dns_added: save_csv(FILES[m]["dns"], dns_set)
-        if smtp_added: save_csv(FILES[m]["smtp"], smtp_set)
-        if dns_added or smtp_added:
-            log(m, f"📊 +{dns_added+smtp_added} | DNS:{len(dns_set)} | SMTP:{len(smtp_set)} | FINAL:{len(final_set)}")
+            if level=='L4': L4.add(em); added_L4+=1; log(m, f"✅ L4: {em}")
+            elif level=='L3': L3.add(em); added_L3+=1; log(m, f"⚠️ L3: {em}")
+        if added_L3: save_csv(FILES[m]["L3"], L3)
+        if added_L4:
+            save_csv(FILES[m]["L4"], L4)
+            # Push L4 vers GitHub pour vérification SMTP
+            push_to_github(FILES[m]["L4"], '\n'.join(['email']+sorted(L4)))
+        if added_L3 or added_L4:
+            log(m, f"📊 +{added_L3+added_L4} | L3:{len(L3)} | L4:{len(L4)} | L5:{len(L5)}")
         time.sleep(random.randint(10,30))
 
 threading.Thread(target=run_moteur,args=("np",scrape_npm),daemon=True).start()
@@ -175,11 +180,7 @@ threading.Thread(target=run_moteur,args=("y@",scrape_youtube),daemon=True).start
 @app.route('/stats/<m>')
 def stats(m):
     if m not in FILES: return jsonify({})
-    return jsonify({
-        "dns": count_csv(FILES[m]["dns"]),
-        "smtp": count_csv(FILES[m]["smtp"]),
-        "final": count_csv(FILES[m]["final"])
-    })
+    return jsonify({"L3":count_csv(FILES[m]["L3"]),"L4":count_csv(FILES[m]["L4"]),"L5":count_csv(FILES[m]["L5"])})
 
 @app.route('/live/<m>')
 def live(m):
@@ -197,15 +198,17 @@ def live(m):
 
 @app.route('/download/<m>/<t>')
 def download(m,t):
-    if m not in FILES or t not in FILES[m]: return jsonify({"emails":[]})
+    if m not in FILES: return jsonify({"emails":[]})
+    t = f"L{t}" if t in ['3','4','5'] else t
+    if t not in FILES[m]: return jsonify({"emails":[]})
     n=request.args.get('n',50,type=int)
     return jsonify({"emails":read_csv(FILES[m][t])[:n]})
 
-@app.route('/clear/<m>/<t>')
-def clear(m,t):
-    if m not in FILES or t not in FILES[m]: return jsonify({"msg":"?"})
-    save_csv(FILES[m][t], [])
-    return jsonify({"msg":f"{m}/{t} vidé"})
+@app.route('/clear/<m>')
+def clear(m):
+    if m not in FILES: return jsonify({"msg":"?"})
+    for t in FILES[m].values(): save_csv(t, [])
+    return jsonify({"msg":f"{m} vidé"})
 
 @app.route('/')
 def home(): return "OK"
