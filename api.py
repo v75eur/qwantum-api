@@ -107,6 +107,11 @@ def scraper_loop():
                 with open(BANQUE_FILE, 'w', newline='') as f:
                     w = csv.writer(f); w.writerow(['email'])
                     for e in sorted(SEEN): w.writerow([e])
+                # Push to GitHub
+                try:
+                    os.system(f'git add {BANQUE_FILE} && git commit -m "Banque brute {len(SEEN)}" && git push origin main')
+                    log(f"📤 Push GitHub: {len(SEEN)} emails bruts")
+                except Exception as e: log(f"❌ Push: {e}")
                 verif = len(fetch_emails())
                 log(f"📊 +{added} nouveaux | Brute: {len(SEEN)} | Vérifiée: {verif} | ⏳ En attente SMTP")
             else:
