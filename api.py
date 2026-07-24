@@ -12,6 +12,7 @@ EMAIL_REGEX = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
 LOGS = {"np": [], "gt": [], "y@": []}
 LOCKS = {"np": threading.Lock(), "gt": threading.Lock(), "y@": threading.Lock()}
+FILTERS = {"np": "", "gt": "", "y@": ""}
 
 def log(m, msg):
     t = datetime.now().strftime('%H:%M:%S')
@@ -19,7 +20,6 @@ def log(m, msg):
     print(f"[{m}] {line}", flush=True)
     with LOCKS[m]: LOGS[m].append(line); del LOGS[m][:-500]
 
-# 3 fichiers par moteur
 FILES = {
     "np": {"L3": "L3_np.csv", "L4": "L4_np.csv", "L5": "L5_np.csv"},
     "gt": {"L3": "L3_gt.csv", "L4": "L4_gt.csv", "L5": "L5_gt.csv"},
@@ -65,11 +65,9 @@ def is_catch_all(domain, td):
         td[domain] = (code == 250)
         return td[domain]
     except:
-        td[domain] = False
-        return False
+        td[domain] = False; return False
 
 def verify(email, td):
-    """Retourne 'L3', 'L4', ou None"""
     if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email): return None
     if is_disposable(email): return None
     if not dns_ok(email): return None
@@ -152,7 +150,8 @@ def run_moteur(m, scraper):
     L3=set(read_csv(FILES[m]["L3"])); L4=set(read_csv(FILES[m]["L4"])); L5=set(read_csv(FILES[m]["L5"]))
     SEEN=L3|L4|L5
     tested={}
-    log(m, f"🚀 L3:{len(L3)} | L4:{len(L4)} | L5:{len(L5)}")
+    log(m, f"🚀 L3:{len(L3)} L4:{len(L4)} L5:{len(L5)}")
+    last_push=time.time()
     while True:
         kw=random.choice(WORDS)
         log(m, f"🔍 {kw}")
@@ -160,6 +159,7 @@ def run_moteur(m, scraper):
         added_L3=0; added_L4=0
         for em in new:
             if em in SEEN: continue
+            if FILTERS.get(m) and not em.endswith('@'+FILTERS[m]): continue
             SEEN.add(em)
             level=verify(em, tested)
             if level=='L4': L4.add(em); added_L4+=1; log(m, f"✅ L4: {em}")
@@ -167,10 +167,11 @@ def run_moteur(m, scraper):
         if added_L3: save_csv(FILES[m]["L3"], L3)
         if added_L4:
             save_csv(FILES[m]["L4"], L4)
-            # Push L4 vers GitHub pour vérification SMTP
-            push_to_github(FILES[m]["L4"], '\n'.join(['email']+sorted(L4)))
+            if time.time()-last_push>300:
+                push_to_github(FILES[m]["L4"], '\n'.join(['email']+sorted(L4)))
+                last_push=time.time()
         if added_L3 or added_L4:
-            log(m, f"📊 +{added_L3+added_L4} | L3:{len(L3)} | L4:{len(L4)} | L5:{len(L5)}")
+            log(m, f"📊 +{added_L3+added_L4} | L3:{len(L3)} L4:{len(L4)} L5:{len(L5)}")
         time.sleep(random.randint(10,30))
 
 threading.Thread(target=run_moteur,args=("np",scrape_npm),daemon=True).start()
@@ -203,6 +204,15 @@ def download(m,t):
     if t not in FILES[m]: return jsonify({"emails":[]})
     n=request.args.get('n',50,type=int)
     return jsonify({"emails":read_csv(FILES[m][t])[:n]})
+
+@app.route('/filter/<m>', methods=['POST'])
+def set_filter(m):
+    if m not in FILTERS: return jsonify({"msg":"?"})
+    d=request.get_json()
+    domain=d.get('domain','').strip().lower() if d else ''
+    FILTERS[m]=domain
+    log(m, f"🎯 Filtre: {'@'+domain if domain else 'TOUS'}")
+    return jsonify({"msg":f"Filtre {m}: {'@'+domain if domain else 'TOUS'}"})
 
 @app.route('/clear/<m>')
 def clear(m):

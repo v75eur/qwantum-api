@@ -1,10 +1,8 @@
-name: Vérification SMTP L5
+name: SMTP L5
 on:
-  schedule:
-    - cron: '0 */3 * * *'
+  schedule: [{cron: '0 */3 * * *'}]
   workflow_dispatch:
-permissions:
-  contents: write
+permissions: {contents: write}
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -12,61 +10,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        with: {python-version: '3.11'}
       - run: pip install dnspython
-      - name: SMTP L5
+      - name: SMTP
         run: |
-          python3 << 'PYEOF'
-          import csv, smtplib, dns.resolver, os, time
-
-          def smtp_ok(email):
+          python3 -c "
+          import csv, smtplib, dns.resolver, os
+          def ok(e):
               try:
-                  d = email.split('@')[1]
-                  mx = str(dns.resolver.resolve(d, 'MX')[0].exchange)
-                  s = smtplib.SMTP(mx, 25, timeout=8)
-                  s.helo(); s.mail('verify@system.net')
-                  code, _ = s.rcpt(email); s.quit()
-                  return code == 250
+                  d=e.split('@')[1]; mx=str(dns.resolver.resolve(d,'MX')[0].exchange)
+                  s=smtplib.SMTP(mx,25,timeout=8); s.helo(); s.mail('v@x.net')
+                  c,_=s.rcpt(e); s.quit(); return c==250
               except: return False
-
-          for moteur in ['np', 'gt', 'y@']:
-              l4_file = f'L4_{moteur}.csv'
-              l5_file = f'L5_{moteur}.csv'
-              if not os.path.exists(l4_file): continue
-              
-              l4 = set()
-              with open(l4_file) as f:
+          for m in ['np','gt','y@']:
+              l4=f'L4_{m}.csv'; l5=f'L5_{m}.csv'
+              if not os.path.exists(l4): continue
+              l4s=set(); l5s=set()
+              with open(l4) as f:
                   for l in f.readlines()[1:]:
-                      if l.strip(): l4.add(l.strip())
-              
-              l5 = set()
-              if os.path.exists(l5_file):
-                  with open(l5_file) as f:
+                      if l.strip(): l4s.add(l.strip())
+              if os.path.exists(l5):
+                  with open(l5) as f:
                       for l in f.readlines()[1:]:
-                          if l.strip(): l5.add(l.strip())
-              
-              new_l5 = []
-              for email in l4:
-                  if email in l5: continue
-                  print(f"Test: {email}")
-                  if smtp_ok(email):
-                      l5.add(email); new_l5.append(email)
-                      print(f"  ✅ L5")
-                  else:
-                      print(f"  ❌")
-              
-              if new_l5:
-                  with open(l5_file, 'w', newline='') as f:
-                      w = csv.writer(f); w.writerow(['email'])
-                      for e in sorted(l5): w.writerow([e])
-                  print(f"✅ {moteur}: +{len(new_l5)} L5 | Total: {len(l5)}")
-          PYEOF
-      - name: Commit L5
+                          if l.strip(): l5s.add(l.strip())
+              new=[]
+              for e in l4s:
+                  if e in l5s: continue
+                  print(f'Test: {e}')
+                  if ok(e): l5s.add(e); new.append(e); print('  ✅')
+                  else: print('  ❌')
+              if new:
+                  with open(l5,'w',newline='') as f:
+                      w=csv.writer(f); w.writerow(['email'])
+                      for e in sorted(l5s): w.writerow([e])
+                  print(f'✅ {m}: +{len(new)} L5')
+          "
+      - name: Commit
         run: |
           git config user.name 'QWANTUM'
-          git config user.email 'qwantum@bot.com'
+          git config user.email 'q@q.com'
           git add L5_*.csv
-          git commit -m "✅ L5 SMTP - $(date +%Y%m%d-%H%M)" || echo "Rien à commit"
+          git commit -m "✅ L5 $(date +%Y%m%d-%H%M)" || echo "Rien"
           git pull origin main --rebase || true
           git push origin main
