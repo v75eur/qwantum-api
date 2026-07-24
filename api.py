@@ -46,9 +46,12 @@ def scrape_npm(kw):
                     mail = m.get("email","")
                     if EMAIL_REGEX.search(mail):
                         em = mail.lower()
-                        if em not in found and dns_ok(em):
-                            found.append(em)
-                            log(f"✅ {em}")
+                        if em not in found:
+                            if dns_ok(em):
+                                found.append(em)
+                                log(f"✅ DNS OK: {em}")
+                            else:
+                                log(f"❌ DNS KO: {em}")
     except Exception as e: log(f"❌ npm: {e}")
     return found
 
@@ -69,9 +72,12 @@ def scrape_github(kw):
                         if r2.status_code == 200:
                             for e in EMAIL_REGEX.findall(r2.text):
                                 em = e.lower()
-                                if em not in found and dns_ok(em):
-                                    found.append(em)
-                                    log(f"✅ GH: {em}")
+                                if em not in found:
+                                    if dns_ok(em):
+                                        found.append(em)
+                                        log(f"✅ DNS OK: {em}")
+                                    else:
+                                        log(f"❌ DNS KO: {em}")
                     except: pass
     except Exception as e: log(f"❌ GH: {e}")
     return found
@@ -85,35 +91,45 @@ def scraper_loop():
         with open(BANQUE_FILE) as f:
             for l in f.readlines()[1:]:
                 if l.strip(): SEEN.add(l.strip())
-    log(f"🚀 SCRAPER DÉMARRÉ (6h-00h) | Banque brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
+    log(f"🚀 SCRAPER DÉMARRÉ (6h-00h) | Brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
     while True:
         h = datetime.now().hour
         if 6 <= h < 24:
             kw = random.choice(WORDS)
             log(f"🔍 Recherche: '{kw}'")
             new = scrape_npm(kw) + scrape_github(kw)
+            added = 0
             for em in new:
                 if em not in SEEN:
                     SEEN.add(em)
-            if new:
+                    added += 1
+            if added:
                 with open(BANQUE_FILE, 'w', newline='') as f:
                     w = csv.writer(f); w.writerow(['email'])
                     for e in sorted(SEEN): w.writerow([e])
-                log(f"✅ +{len(new)} avec '{kw}' | Brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
+                verif = len(fetch_emails())
+                log(f"📊 +{added} nouveaux | Brute: {len(SEEN)} | Vérifiée: {verif} | ⏳ En attente SMTP")
             else:
-                log(f"⏳ 0 avec '{kw}' | Brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
-            time.sleep(random.randint(600, 1200))
+                log(f"⏳ 0 nouveau avec '{kw}' | Brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
+            time.sleep(random.randint(10, 30))
         else:
-            log(f"💤 Pause nocturne (00h-6h)")
-            time.sleep(600)
+            log(f"💤 Nuit (00h-6h) | Brute: {len(SEEN)} | Vérifiée: {len(fetch_emails())}")
+            time.sleep(60)
 
 threading.Thread(target=scraper_loop, daemon=True).start()
 
+# --- ROUTES ---
 @app.route('/')
 def home(): return "QWANTUM API OK"
 
 @app.route('/count')
 def count(): return jsonify({"count": len(fetch_emails())})
+
+@app.route('/count-brute')
+def count_brute():
+    try:
+        with open('banque_emails.csv') as f: return jsonify({"count": len(f.readlines())-1})
+    except: return jsonify({"count": 0})
 
 @app.route('/live-logs')
 def live_logs():
